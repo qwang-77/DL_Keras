@@ -122,6 +122,7 @@ model %>%
 At last, we can predict the test with the function predict_classes(), and the first argument is our model trained in the last step, and another argument we need is the testing covariates made in the last step.
 
 ```{r}
-model %>% predict(x_test) %>% k_argmax()
+xx <- model %>% predict(x_test)
+str(xx)
 ```
 *How to get the values? It only return a tf.tensor something, but I want to get the predictions of the picture.
