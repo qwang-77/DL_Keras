@@ -2,28 +2,170 @@
 title: "Convolution NN - Keras"
 author: "Qi Wang"
 date: "2023/2/8"
-output: pdf_document
+output: 
+  pdf_document:
+        latex_engine: xelatex   
 ---
 
 ```{r setup, include=FALSE}
+rm(list = ls())
+library(reticulate)
+library(tensorflow)
+library(keras)
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+Here I will show an example about how to carry out convolution neural networking in Keras package in R.
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+# Data Operation
 
-```{r cars}
-summary(cars)
+Like our last file, we still need to read the minst data and split it into training and testing sets.
+```{r}
+mnist <- dataset_mnist()
+x_train <- mnist$train$x
+y_train <- mnist$train$y
+x_test <- mnist$test$x
+y_test <- mnist$test$y
 ```
 
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
+So what does our data look like? First, we have a rough plot of this picture. Noticing that the dimension of the training data is 60000 by 28 by 28. It's obvious that 28 by 28 is a picture, and 60000 is the number of observations in the training data set.
+```{r}
+dim(x_train)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+index_image = 1000 ## change this index to see different image. For now, we see the 1000th picture
+input_matrix <- x_train[index_image,1:28,1:28]
+output_matrix <- apply(input_matrix, 2, rev)
+output_matrix <- t(output_matrix)
+image(1:28, 1:28, output_matrix, col=gray.colors(256), xlab=paste('Image for digit of: ', y_train[index_image]), ylab="")
+
+```
+Now after having a first impression of the data, we should first define some parameters to operate the convolution structure.
+
+```{r}
+# Define a few parameters to be used in the CNN model
+batch_size <- 128
+num_classes <- 10
+epochs <- 30
+
+# Input image dimensions
+img_rows <- 28
+img_cols <- 28
+```
+
+
+# Channels:
+
+For CNN method, the input of the $M\times N$ image is a $M\times N\times K$ 3D array with K specific channels. For example, a grey scale $M\times N$ image has only one channel, and the input is actually $M\times N\times 1$ tensor. And the $M\times N$ 8-bit per channel RGB image has three channels with three $M\times N$ array with values between 0 and 255, so the input is actually $M\times N \times 3$ tensor. For now as shown above, this picture is just a greyscale one. However, we need to specifically define the channel. So we just change the 2D array to the 3D array using array_reshape(). The input_shape variable will be used in the CNN model later. For RGB color image, the number of channels is 3 and we need to replace the "1" with "3" if we are handling the RGB data.
+
+```{r}
+x_train <- array_reshape(x_train, c(nrow(x_train), img_rows, img_cols, 1))
+x_test <- array_reshape(x_test, c(nrow(x_test), img_rows, img_cols, 1))
+input_shape <- c(img_rows, img_cols, 1)
+```
+
+So, we can see the first dimension is the observation ID the second to the fourth dimension is the image data dimension. Noticing that the last dimension is the number of channels, although all the pictures are one.
+
+# Scaling:
+
+We need to scale the input values between 0 to 1 for the same numerical stability considerations.
+
+```{r}
+x_train <- x_train / 255
+x_test <- x_test / 255
+```
+
+
+# Categorical Transformation:
+
+Similar to the deep neural networking, we need to transform the response variable Y to the categorigal way.
+
+```{r}
+y_train <- to_categorical(y_train, num_classes)
+y_test <- to_categorical(y_test, num_classes)
+```
+
+
+
+# Fit a CNN model
+
+The convolution neural networking for a 2D convolution layers actually contains a few parameters:
+
+1. The kernel size, which is always typically 3\*3 or 5\*5. 
+2. The number of filters, which is corresponding to the number of channels. 
+3. Activation function
+
+Also, for the first layer, we always have a input_shape parameter which is the input image size and channel. To prevent overfitting, a pooling layer is usually used after one or a few 2D convolutional layers. A typical pooling of return the maximum of the 2*2 pool_size as the new value in the output which essentially reduce the size to half. Dropout can be used as well in addition to pooling neighbor values. After a few 2D convolutional layers, we also need "flatten" the 3D tensor output to a 1D tensor, and then add one or a couple of dense layers to connect the output from 2D convolutional layers to the target response classes.
+
+
+Notes:
+
+1. Convolution includes a convolutional kernel, we have to define this small kernel matrix. Most frequently, it's a 3 by 3 or 5 by 5 square matrix, and move this matrix from the top left to right and down to the bottom right, we will get a smaller convolutional transformed data. 
+
+2. What is convolution? The formula is as follows:
+
+```{r}
+knitr:: include_graphics(here::here("pictures/cnn_formula.png"))
+```
+This tells us how to calculate the convolution of the function or matrix. v and h here are just row and column index. Here is a 3*3 example:
+
+```{r}
+knitr:: include_graphics(here::here("pictures/cnn_mat.png"))
+```
+
+If we want $(f*g)(x,y)$ then we just sum the same color's product. 
+
+*However, question is that, why is the index of g matrix like that? Why it's not like the f matrix beginning from 00 to 22?*
+
+
+3. What is pooling? Pooling also has a way to avoid overfitting. It's actually output the maximum or average of the size of the kernel size. This is different from the convolution because this time is non-overlap operation. For example, if the kernel size is 2 by 2, then the first partial maximum is the top left 2*2 matrix. Then it comes to the X[1:2,3:4] since we never overlaps the data.
+
+
+4. Dense layer is just the linear operator layer?
+
+
+# Build a model
+
+```{r}
+# define model structure 
+cnn_model <- keras_model_sequential() %>%
+  layer_conv_2d(filters = 32, kernel_size = c(3,3), activation = 'relu', input_shape = input_shape) %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_conv_2d(filters = 64, kernel_size = c(3,3), activation = 'relu') %>% 
+  layer_max_pooling_2d(pool_size = c(2, 2)) %>% 
+  layer_dropout(rate = 0.25) %>% 
+  layer_flatten() %>% 
+  layer_dense(units = 128, activation = 'relu') %>% 
+  layer_dropout(rate = 0.5) %>% 
+  layer_dense(units = num_classes, activation = 'softmax')
+summary(cnn_model)
+```
+So here we actually have two pairs of convolution and pool layer, then we flatten the data to build the model.
+
+# Compile a model
+
+Then we just compile the model with our defined loss function, optimizer and performace showing cretiria.
+```{r}
+cnn_model %>% compile(
+  loss = loss_categorical_crossentropy,
+  optimizer = optimizer_adadelta(),
+  metrics = c('accuracy')
+)
+```
+
+# Train the model
+
+```{r}
+# Train model
+cnn_history <- cnn_model %>% fit(
+  x_train, y_train,
+  batch_size = batch_size,
+  epochs = epochs,
+  validation_split = 0.2
+)
+```
+
+
+
+
